@@ -54,9 +54,9 @@ PROMPT = (
     "When current tasks are done, audit for issues and add missing work to TODO.md.\n"
 )
 
-# Patterns reproducing the original bash greps
-RATE_LIMIT_MSG = re.compile(r"Claude.*(?:usage|use|limit).*reach", re.IGNORECASE)
-FIRST_INT = re.compile(r"(\d+)")
+# Patterns for rate limit detection
+RATE_LIMIT_MSG = re.compile(r"limit\s+reached", re.IGNORECASE)
+RESET_TIME_PATTERN = re.compile(r"resets\s+(\d{1,2})(am|pm)", re.IGNORECASE)
 
 
 def last_json_line(path: Path) -> str:
@@ -96,10 +96,62 @@ def rate_limit_reset_epoch(raw_json: str) -> Optional[int]:
         if data.get("is_error") and "result" in data:
             result = data["result"]
             # Check if it's a rate limit message using the regex
-            if RATE_LIMIT_MSG.search(result) and "|" in result:
-                # Extract the timestamp after the pipe character
-                timestamp_str = result.split("|", 1)[1]
-                return int(timestamp_str)
+            if RATE_LIMIT_MSG.search(result):
+                # Look for "resets 3am" format
+                reset_match = RESET_TIME_PATTERN.search(result)
+                if reset_match:
+                    hour = int(reset_match.group(1))
+                    am_pm = reset_match.group(2).lower()
+                    
+                    # Convert to 24-hour format
+                    if am_pm == 'pm' and hour != 12:
+                        hour += 12
+                    elif am_pm == 'am' and hour == 12:
+                        hour = 0
+                    
+                    # Calculate next occurrence of this time
+                    now = datetime.now()
+                    reset_today = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+                    
+                    # If the reset time already passed today, it's tomorrow
+                    if reset_today <= now:
+                        reset_today += timedelta(days=1)
+                    
+                    return int(reset_today.timestamp())
+                
+                # Fallback: look for old format with pipe and epoch timestamp
+                if "|" in result:
+                    timestamp_str = result.split("|", 1)[1].strip()
+                    return int(timestamp_str)
+                    
+        # Also check message content for assistant messages containing rate limit info
+        elif data.get("type") == "assistant":
+            content = data.get("message", {}).get("content", [])
+            for item in content:
+                if item.get("type") == "text":
+                    text = item.get("text", "")
+                    if RATE_LIMIT_MSG.search(text):
+                        reset_match = RESET_TIME_PATTERN.search(text)
+                        if reset_match:
+                            hour = int(reset_match.group(1))
+                            am_pm = reset_match.group(2).lower()
+                            
+                            # Convert to 24-hour format
+                            if am_pm == 'pm' and hour != 12:
+                                hour += 12
+                            elif am_pm == 'am' and hour == 12:
+                                hour = 0
+                            
+                            # Calculate next occurrence of this time
+                            now = datetime.now()
+                            reset_today = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+                            
+                            # If the reset time already passed today, it's tomorrow
+                            if reset_today <= now:
+                                reset_today += timedelta(days=1)
+                            
+                            return int(reset_today.timestamp())
+                            
     except (json.JSONDecodeError, ValueError, IndexError) as e:
         print(f"Error parsing JSON: {e}", file=sys.stderr, flush=True)
 
