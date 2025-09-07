@@ -16,6 +16,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+env = os.environ.copy()
+
+env['API_TIMEOUT_MS'] = '600000'
+env['ANTHROPIC_AUTH_TOKEN'] = 'urkey'
+env['ANTHROPIC_BASE_URL'] = 'https://api.z.ai/api/anthropic'
+env['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'] = '1'
+
 # TODO: Don't clobber, have per-project json
 OUTPUT_PATH = Path("/dev/shm/output.json")
 
@@ -315,6 +322,7 @@ def main() -> None:
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            env=env,
         )
 
         # Stream output: save raw JSON to file, show clean summaries to user
